@@ -34,7 +34,8 @@ jobs:
             echo "package.json not found in ZIP"
             exit 1
           fi
-          cp -a "$SOURCE_DIR"/. .
+          cp -a "$SOURCE_DIR"/. 
+          rm -f capacitor.config.ts
           test -f www/index.html
 
             - name: Install Dependencies
