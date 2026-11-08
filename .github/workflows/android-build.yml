@@ -25,7 +25,19 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - name: Install dependencies
+      - name: Extract App Source
+        run: |
+          mkdir -p extracted
+          unzip -q irfan-al-uloom-miras-source.zip -d extracted
+          SOURCE_DIR="$(dirname "$(find extracted -type f -name package.json -print -quit)")"
+          if [ -z "$SOURCE_DIR" ]; then
+            echo "package.json not found in ZIP"
+            exit 1
+          fi
+          cp -a "$SOURCE_DIR"/. .
+          test -f www/index.html
+
+      - name: Install Dependencies
         run: npm install
 
       - name: Add Android
