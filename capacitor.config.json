@@ -1,0 +1,10 @@
+{
+  "appId": "com.irfanululoom.mirascalculator",
+  "appName": "Irfan al-Uloom Miras Calculator",
+  "webDir": "www",
+  "bundledWebRuntime": false,
+  "android": {
+    "allowMixedContent": false,
+    "captureInput": true
+  }
+}
