@@ -1,4 +1,3 @@
-
 name: Android Build
 
 on:
@@ -33,7 +32,7 @@ jobs:
           unzip -q irfan-al-uloom-miras-source.zip -d extracted
           SOURCE_FILE="$(find extracted -type f -name package.json -print -quit)"
           if [ -z "$SOURCE_FILE" ]; then
-            echo "package.json not found in ZIP"
+            echo 'package.json not found in ZIP'
             exit 1
           fi
           SOURCE_DIR="$(dirname "$SOURCE_FILE")"
@@ -51,11 +50,57 @@ jobs:
         run: npx cap add android
 
       - name: Install App Icons
-        run: |
-          cp -a android-icons/. android/app/src/main/res/
+        run: cp -a android-icons/. android/app/src/main/res/
 
       - name: Sync Android
         run: npx cap sync android
+
+      - name: Configure Release Signing
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$KEYSTORE_BASE64"
+          test -n "$KEYSTORE_PASSWORD"
+          test -n "$KEY_ALIAS"
+          test -n "$KEY_PASSWORD"
+          echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/miras-upload-key.jks"
+          test -s "$RUNNER_TEMP/miras-upload-key.jks"
+          export KEYSTORE_FILE="$RUNNER_TEMP/miras-upload-key.jks"
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          p = Path('android/app/build.gradle')
+          if not p.exists():
+              raise SystemExit('android/app/build.gradle not found')
+          s = p.read_text()
+          if 'signingConfigs {' in s and 'signingConfig signingConfigs.release' in s:
+              raise SystemExit('Release signing configuration already exists; refusing to duplicate it')
+          if not re.search(r'(?m)^\s*buildTypes\s*\{', s):
+              raise SystemExit('Could not locate buildTypes block in app/build.gradle')
+          signing = '''    signingConfigs {
+          release {
+              storeFile file(System.getenv("KEYSTORE_FILE"))
+              storePassword System.getenv("KEYSTORE_PASSWORD")
+              keyAlias System.getenv("KEY_ALIAS")
+              keyPassword System.getenv("KEY_PASSWORD")
+          }
+          }
+
+          '''
+          s = re.sub(r'(?m)^(\s*)buildTypes\s*\{', lambda m: signing + m.group(0), s, count=1)
+          bt = re.search(r'(?m)^\s*buildTypes\s*\{', s)
+          m = re.search(r'(?m)^(\s*)release\s*\{', s[bt.end():]) if bt else None
+          if not m:
+              raise SystemExit('Could not locate release buildType in app/build.gradle')
+          insert_at = bt.end() + m.end()
+          s = s[:insert_at] + '\n            signingConfig signingConfigs.release' + s[insert_at:]
+          p.write_text(s)
+          PY
+          echo "KEYSTORE_FILE=$KEYSTORE_FILE" >> "$GITHUB_ENV"
 
       - name: Build APK
         run: |
@@ -63,7 +108,12 @@ jobs:
           cd android
           ./gradlew assembleDebug
 
-      - name: Build AAB
+      - name: Build Signed AAB
+        env:
+          KEYSTORE_FILE: ${{ runner.temp }}/miras-upload-key.jks
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           cd android
           ./gradlew bundleRelease
@@ -74,9 +124,8 @@ jobs:
           name: Irfan-Al-Uloom-Miras-APK
           path: android/app/build/outputs/apk/debug/app-debug.apk
 
-      - name: Upload AAB
+      - name: Upload Signed AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Irfan-Al-Uloom-Miras-AAB-unsigned
+          name: Irfan-Al-Uloom-Miras-AAB-signed
           path: android/app/build/outputs/bundle/release/app-release.aab
-
