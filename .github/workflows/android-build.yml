@@ -1,3 +1,4 @@
+
 name: Android Build
 
 on:
@@ -29,16 +30,17 @@ jobs:
         run: |
           mkdir -p extracted
           unzip -q irfan-al-uloom-miras-source.zip -d extracted
-          SOURCE_DIR=$(find extracted -name package.json -printf '%h\n' | head -n 1)
-          if [ -z "$SOURCE_DIR" ]; then
+          SOURCE_FILE="$(find extracted -type f -name package.json -print -quit)"
+          if [ -z "$SOURCE_FILE" ]; then
             echo "package.json not found in ZIP"
             exit 1
           fi
-          cp -a "$SOURCE_DIR"/. 
+          SOURCE_DIR="$(dirname "$SOURCE_FILE")"
+          cp -a "$SOURCE_DIR"/. .
           rm -f capacitor.config.ts
           test -f www/index.html
 
-            - name: Install Dependencies
+      - name: Install Dependencies
         run: |
           npm install
           npm install --save-dev typescript@5.8.3
@@ -60,3 +62,4 @@ jobs:
         with:
           name: Irfan-Al-Uloom-Miras-APK
           path: android/app/build/outputs/apk/debug/app-debug.apk
+
