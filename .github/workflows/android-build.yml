@@ -24,9 +24,11 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 21
+          java-version: 17
+
       - name: Extract App Source
         run: |
+          set -euo pipefail
           mkdir -p extracted
           unzip -q irfan-al-uloom-miras-source.zip -d extracted
           SOURCE_FILE="$(find extracted -type f -name package.json -print -quit)"
@@ -38,6 +40,7 @@ jobs:
           cp -a "$SOURCE_DIR"/. .
           rm -f capacitor.config.ts
           test -f www/index.html
+          test -d android-icons
 
       - name: Install Dependencies
         run: |
@@ -46,6 +49,10 @@ jobs:
 
       - name: Add Android
         run: npx cap add android
+
+      - name: Install App Icons
+        run: |
+          cp -a android-icons/. android/app/src/main/res/
 
       - name: Sync Android
         run: npx cap sync android
@@ -56,9 +63,20 @@ jobs:
           cd android
           ./gradlew assembleDebug
 
+      - name: Build AAB
+        run: |
+          cd android
+          ./gradlew bundleRelease
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Irfan-Al-Uloom-Miras-APK
           path: android/app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Upload AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: Irfan-Al-Uloom-Miras-AAB-unsigned
+          path: android/app/build/outputs/bundle/release/app-release.aab
 
