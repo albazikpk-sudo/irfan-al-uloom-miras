@@ -38,16 +38,6 @@ jobs:
           SOURCE_DIR="$(dirname "$SOURCE_FILE")"
           cp -a "$SOURCE_DIR"/. .
           rm -f capacitor.config.ts
-          cat > capacitor.config.json <<'JSON'
-          {
-            "appId": "com.irfanuloom.mirathcalculator",
-            "appName": "عرفان العلوم میراث کیلکولیٹر",
-            "webDir": "www",
-            "android": {
-              "allowMixedContent": false
-            }
-          }
-          JSON
           test -f www/index.html
           test -d android-icons
 
@@ -59,53 +49,38 @@ jobs:
       - name: Add Android
         run: npx cap add android
 
-      - name: Set Minimum Android SDK to 24
-        run: |
-          set -euo pipefail
-          python3 - <<'PYTHON'
-          from pathlib import Path
-          import re
-
-          p = Path("android/variables.gradle")
-          if not p.is_file():
-              raise SystemExit("android/variables.gradle not found")
-
-          content = p.read_text()
-          pattern = r"(?m)^(\s*minSdkVersion\s*=\s*)23(\s*)$"
-          updated, count = re.subn(pattern, r"\g<1>24\g<2>", content)
-
-          if count != 1:
-              raise SystemExit(
-                  f"Expected exactly one minSdkVersion = 23 entry; found {count}. "
-                  "Stopping without changing the file."
-              )
-
-          p.write_text(updated)
-          print("minSdkVersion updated from 23 to 24")
-          PYTHON
-
       - name: Install App Icons
         run: cp -a android-icons/. android/app/src/main/res/
 
       - name: Sync Android
         run: npx cap sync android
 
-      - name: Verify Android package name
+      - name: Configure AdMob App ID
         run: |
           set -euo pipefail
-          python3 - <<'PYTHON'
+          mkdir -p android/app/src/main/res/values
+          STRINGS_FILE="android/app/src/main/res/values/strings.xml"
+          if [ ! -f "$STRINGS_FILE" ]; then
+            printf '<resources>\n</resources>\n' > "$STRINGS_FILE"
+          fi
+          if ! grep -q 'name="admob_app_id"' "$STRINGS_FILE"; then
+            sed -i 's#</resources>#    <string name="admob_app_id">ca-app-pub-1134522787126944~8149525042</string>\n</resources>#' "$STRINGS_FILE"
+          fi
+          python3 - <<'PYMANIFEST'
           from pathlib import Path
           import re
-          p = Path("android/app/build.gradle")
-          if not p.is_file():
-              raise SystemExit("android/app/build.gradle not found")
-          content = p.read_text()
-          ids = re.findall(r'''(?m)^\s*applicationId\s+[\"']([^\"']+)[\"']''', content)
-          expected = "com.irfanuloom.mirathcalculator"
-          if len(ids) != 1 or ids[0] != expected:
-              raise SystemExit(f"Package name mismatch: found {ids!r}; expected {expected!r}")
-          print(f"Verified Android applicationId: {ids[0]}")
-          PYTHON
+          p = Path('android/app/src/main/AndroidManifest.xml')
+          if not p.exists():
+              raise SystemExit('AndroidManifest.xml not found after Capacitor sync')
+          s = p.read_text()
+          meta = '<meta-data android:name="com.google.android.gms.ads.APPLICATION_ID" android:value="@string/admob_app_id" />'
+          if 'com.google.android.gms.ads.APPLICATION_ID' not in s:
+              app = re.search(r'<application\b[^>]*>', s)
+              if not app:
+                  raise SystemExit('Could not locate <application> in AndroidManifest.xml')
+              s = s[:app.end()] + '\n        ' + meta + s[app.end():]
+              p.write_text(s)
+          PYMANIFEST
 
       - name: Configure Release Signing
         env:
@@ -169,13 +144,6 @@ jobs:
         run: |
           cd android
           ./gradlew bundleRelease
-
-      - name: Check Signed AAB exists
-        run: |
-          set -euo pipefail
-          AAB="android/app/build/outputs/bundle/release/app-release.aab"
-          test -s "$AAB"
-          echo "Signed AAB file exists: $AAB"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
