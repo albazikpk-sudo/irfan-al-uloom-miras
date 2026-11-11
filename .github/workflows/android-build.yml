@@ -49,6 +49,31 @@ jobs:
       - name: Add Android
         run: npx cap add android
 
+      - name: Set Minimum Android SDK to 24
+        run: |
+          set -euo pipefail
+          python3 - <<'PYTHON'
+          from pathlib import Path
+          import re
+
+          p = Path("android/variables.gradle")
+          if not p.is_file():
+              raise SystemExit("android/variables.gradle not found")
+
+          content = p.read_text()
+          pattern = r"(?m)^(\s*minSdkVersion\s*=\s*)23(\s*)$"
+          updated, count = re.subn(pattern, r"\g<1>24\g<2>", content)
+
+          if count != 1:
+              raise SystemExit(
+                  f"Expected exactly one minSdkVersion = 23 entry; found {count}. "
+                  "Stopping without changing the file."
+              )
+
+          p.write_text(updated)
+          print("minSdkVersion updated from 23 to 24")
+          PYTHON
+
       - name: Install App Icons
         run: cp -a android-icons/. android/app/src/main/res/
 
