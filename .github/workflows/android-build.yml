@@ -1,3 +1,4 @@
+
 name: Android Build
 
 on:
@@ -108,29 +109,43 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           import re
+
           p = Path('android/app/build.gradle')
           if not p.exists():
               raise SystemExit('android/app/build.gradle not found')
+
           s = p.read_text()
+
           if 'signingConfigs {' in s and 'signingConfig signingConfigs.release' in s:
               raise SystemExit('Release signing configuration already exists; refusing to duplicate it')
+
           if not re.search(r'(?m)^\s*buildTypes\s*\{', s):
               raise SystemExit('Could not locate buildTypes block in app/build.gradle')
+
           signing = '''    signingConfigs {
-          release {
-              storeFile file(System.getenv("KEYSTORE_FILE"))
-              storePassword System.getenv("KEYSTORE_PASSWORD")
-              keyAlias System.getenv("KEY_ALIAS")
-              keyPassword System.getenv("KEY_PASSWORD")
-          }
+              release {
+                  storeFile file(System.getenv("KEYSTORE_FILE"))
+                  storePassword System.getenv("KEYSTORE_PASSWORD")
+                  keyAlias System.getenv("KEY_ALIAS")
+                  keyPassword System.getenv("KEY_PASSWORD")
+              }
           }
 
           '''
-          s = re.sub(r'(?m)^(\s*)buildTypes\s*\{', lambda m: signing + m.group(0), s, count=1)
+
+          s = re.sub(
+              r'(?m)^(\s*)buildTypes\s*\{',
+              lambda m: signing + m.group(0),
+              s,
+              count=1
+          )
+
           bt = re.search(r'(?m)^\s*buildTypes\s*\{', s)
           m = re.search(r'(?m)^(\s*)release\s*\{', s[bt.end():]) if bt else None
+
           if not m:
               raise SystemExit('Could not locate release buildType in app/build.gradle')
+
           insert_at = bt.end() + m.end()
           s = s[:insert_at] + '\n            signingConfig signingConfigs.release' + s[insert_at:]
           p.write_text(s)
@@ -152,6 +167,25 @@ jobs:
         run: |
           cd android
           ./gradlew bundleRelease
+
+      - name: Verify AAB package name
+        run: |
+          set -euo pipefail
+          META="android/app/build/outputs/bundle/release/output-metadata.json"
+          test -s "$META"
+          python3 - <<'PYTHON'
+          import json
+          from pathlib import Path
+
+          meta = json.loads(Path("android/app/build/outputs/bundle/release/output-metadata.json").read_text())
+          actual = meta.get("applicationId")
+          expected = "com.irfanululoom.mirathcalculator"
+
+          if actual != expected:
+              raise SystemExit(f"Wrong package name in AAB: {actual!r}; expected {expected!r}")
+
+          print(f"Verified AAB package name: {actual}")
+          PYTHON
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
