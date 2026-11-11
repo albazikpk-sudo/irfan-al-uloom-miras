@@ -38,6 +38,16 @@ jobs:
           SOURCE_DIR="$(dirname "$SOURCE_FILE")"
           cp -a "$SOURCE_DIR"/. .
           rm -f capacitor.config.ts
+          cat > capacitor.config.json <<'JSON'
+          {
+            "appId": "com.irfanululoom.mirathcalculator",
+            "appName": "عرفان العلوم میراث کیلکولیٹر",
+            "webDir": "www",
+            "android": {
+              "allowMixedContent": false
+            }
+          }
+          JSON
           test -f www/index.html
           test -d android-icons
 
