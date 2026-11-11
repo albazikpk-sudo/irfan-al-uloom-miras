@@ -61,6 +61,27 @@ jobs:
           node -e "const p=require('./node_modules/@capacitor-community/admob/package.json'); if(p.version !== '7.0.3') throw new Error('Unexpected AdMob plugin version: ' + p.version); console.log('AdMob plugin version:',p.version)"
           test -s www/admob.bundle.js
 
+      - name: Verify Production AdMob Banner Configuration
+        run: |
+          set -euo pipefail
+          python3 - <<'PYTHON'
+          from pathlib import Path
+
+          production_id = "ca-app-pub-1134522787126944/5939274618"
+          test_id = "ca-app-pub-3940256099942544/6300978111"
+          source = Path("www/admob.js").read_text()
+          bundle = Path("www/admob.bundle.js").read_text()
+
+          for name, content in (("www/admob.js", source), ("www/admob.bundle.js", bundle)):
+              if production_id not in content:
+                  raise SystemExit(f"Production Banner ID missing from {name}")
+              if test_id in content:
+                  raise SystemExit(f"Test Banner ID found in {name}; refusing production build")
+          if "isTesting: false" not in source:
+              raise SystemExit("Production mode is not explicitly enabled (isTesting: false)")
+          print("Production AdMob Banner ID and live mode verified in source and bundle.")
+          PYTHON
+
       - name: Add Android
         run: npx cap add android
 
