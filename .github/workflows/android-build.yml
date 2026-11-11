@@ -1,4 +1,3 @@
-
 name: Android Build
 
 on:
@@ -78,15 +77,39 @@ jobs:
                   raise SystemExit(f"Production Banner ID missing from {name}")
               if test_id in content:
                   raise SystemExit(f"Test Banner ID found in {name}; refusing production build")
-
           if "isTesting: false" not in source:
               raise SystemExit("Production mode is not explicitly enabled (isTesting: false)")
-
-          print("Production AdMob Banner ID and live mode verified.")
+          print("Production AdMob Banner ID and live mode verified in source and bundle.")
           PYTHON
 
       - name: Add Android
         run: npx cap add android
+
+      - name: Set Android Version Code to 2
+        run: |
+          set -euo pipefail
+          python3 - <<'PYTHON'
+          from pathlib import Path
+          import re
+
+          p = Path("android/app/build.gradle")
+          if not p.is_file():
+              raise SystemExit("android/app/build.gradle not found")
+
+          content = p.read_text()
+          pattern = r"(?m)^(\s*versionCode\s+)\d+(\s*)$"
+          updated, count = re.subn(pattern, r"\g<1>2\g<2>", content)
+
+          if count != 1:
+              raise SystemExit(f"Expected exactly one versionCode entry; found {count}")
+
+          p.write_text(updated)
+          check = re.search(r"(?m)^\s*versionCode\s+(\d+)", p.read_text())
+          if not check or check.group(1) != "2":
+              raise SystemExit("Failed to set versionCode to 2")
+
+          print("Verified Android versionCode = 2")
+          PYTHON
 
       - name: Set Minimum Android SDK to 24
         run: |
@@ -94,32 +117,16 @@ jobs:
           python3 - <<'PYTHON'
           from pathlib import Path
           import re
-
           p = Path("android/variables.gradle")
           if not p.is_file():
               raise SystemExit("android/variables.gradle not found")
-
           content = p.read_text()
-
-          pattern = r"(?m)^(\s*minSdkVersion\s*=\s*)\d+(\s*(?:#.*)?$)"
+          pattern = r"(?m)^(\s*minSdkVersion\s*=\s*)23(\s*)$"
           updated, count = re.subn(pattern, r"\g<1>24\g<2>", content)
-
           if count != 1:
-              raise SystemExit(
-                  f"Expected exactly one numeric minSdkVersion entry; found {count}"
-              )
-
+              raise SystemExit(f"Expected exactly one minSdkVersion = 23 entry; found {count}")
           p.write_text(updated)
-
-          check = re.search(
-              r"(?m)^\s*minSdkVersion\s*=\s*(\d+)",
-              p.read_text()
-          )
-
-          if not check or check.group(1) != "24":
-              raise SystemExit("Failed to set minSdkVersion to 24")
-
-          print("Verified minSdkVersion = 24")
+          print("minSdkVersion updated from 23 to 24")
           PYTHON
 
       - name: Install App Icons
@@ -139,56 +146,39 @@ jobs:
           android_ns = "http://schemas.android.com/apk/res/android"
           ET.register_namespace("android", android_ns)
 
+          # Add/update the string resource expected by the AdMob plugin manifest entry.
           values_dir = Path("android/app/src/main/res/values")
           values_dir.mkdir(parents=True, exist_ok=True)
           strings_file = values_dir / "strings.xml"
-
           if strings_file.exists():
               strings_tree = ET.parse(strings_file)
               strings_root = strings_tree.getroot()
           else:
               strings_root = ET.Element("resources")
               strings_tree = ET.ElementTree(strings_root)
-
-          app_id_nodes = [
-              node for node in strings_root.findall("string")
-              if node.get("name") == "admob_app_id"
-          ]
-
+          app_id_nodes = [node for node in strings_root.findall("string") if node.get("name") == "admob_app_id"]
           if app_id_nodes:
               app_id_nodes[0].text = app_id
               for duplicate in app_id_nodes[1:]:
                   strings_root.remove(duplicate)
           else:
-              node = ET.SubElement(
-                  strings_root, "string", {"name": "admob_app_id"}
-              )
+              node = ET.SubElement(strings_root, "string", {"name": "admob_app_id"})
               node.text = app_id
-
           ET.indent(strings_tree, space="    ")
-          strings_tree.write(
-              strings_file, encoding="utf-8", xml_declaration=True
-          )
+          strings_tree.write(strings_file, encoding="utf-8", xml_declaration=True)
 
+          # Add/update the required Google Mobile Ads application metadata.
           manifest_file = Path("android/app/src/main/AndroidManifest.xml")
           if not manifest_file.is_file():
               raise SystemExit("AndroidManifest.xml not found")
-
           manifest_tree = ET.parse(manifest_file)
           manifest_root = manifest_tree.getroot()
           application = manifest_root.find("application")
-
           if application is None:
-              raise SystemExit("<application> element not found")
-
+              raise SystemExit("<application> element not found in AndroidManifest.xml")
           key = f"{{{android_ns}}}name"
           value_key = f"{{{android_ns}}}value"
-
-          matches = [
-              node for node in application.findall("meta-data")
-              if node.get(key) == "com.google.android.gms.ads.APPLICATION_ID"
-          ]
-
+          matches = [node for node in application.findall("meta-data") if node.get(key) == "com.google.android.gms.ads.APPLICATION_ID"]
           if matches:
               matches[0].set(value_key, "@string/admob_app_id")
               for duplicate in matches[1:]:
@@ -198,36 +188,18 @@ jobs:
                   key: "com.google.android.gms.ads.APPLICATION_ID",
                   value_key: "@string/admob_app_id"
               })
-
           ET.indent(manifest_tree, space="    ")
-          manifest_tree.write(
-              manifest_file, encoding="utf-8", xml_declaration=True
-          )
+          manifest_tree.write(manifest_file, encoding="utf-8", xml_declaration=True)
 
+          # Read back and fail the workflow if either setting is missing/wrong.
           check_strings = ET.parse(strings_file).getroot()
-          found_id = next(
-              (
-                  n.text for n in check_strings.findall("string")
-                  if n.get("name") == "admob_app_id"
-              ),
-              None
-          )
-
+          found_id = next((n.text for n in check_strings.findall("string") if n.get("name") == "admob_app_id"), None)
           check_manifest = ET.parse(manifest_file).getroot()
           check_app = check_manifest.find("application")
-          found_meta = [
-              n for n in check_app.findall("meta-data")
-              if n.get(key) == "com.google.android.gms.ads.APPLICATION_ID"
-          ]
-
-          if (
-              found_id != app_id
-              or len(found_meta) != 1
-              or found_meta[0].get(value_key) != "@string/admob_app_id"
-          ):
+          found_meta = [n for n in check_app.findall("meta-data") if n.get(key) == "com.google.android.gms.ads.APPLICATION_ID"]
+          if found_id != app_id or len(found_meta) != 1 or found_meta[0].get(value_key) != "@string/admob_app_id":
               raise SystemExit("AdMob Android configuration verification failed")
-
-          print("AdMob App ID and AndroidManifest verified.")
+          print("AdMob App ID resource and AndroidManifest metadata verified")
           PYTHON
 
       - name: Verify Android package name
@@ -236,24 +208,14 @@ jobs:
           python3 - <<'PYTHON'
           from pathlib import Path
           import re
-
           p = Path("android/app/build.gradle")
           if not p.is_file():
               raise SystemExit("android/app/build.gradle not found")
-
           content = p.read_text()
-          ids = re.findall(
-              r'''(?m)^\s*applicationId\s+["']([^"']+)["']''',
-              content
-          )
-
+          ids = re.findall(r'''(?m)^\s*applicationId\s+["']([^"']+)["']''', content)
           expected = "com.irfanuloom.mirathcalculator"
-
           if len(ids) != 1 or ids[0] != expected:
-              raise SystemExit(
-                  f"Package name mismatch: found {ids!r}; expected {expected!r}"
-              )
-
+              raise SystemExit(f"Package name mismatch: found {ids!r}; expected {expected!r}")
           print(f"Verified Android applicationId: {ids[0]}")
           PYTHON
 
@@ -269,28 +231,20 @@ jobs:
           test -n "$KEYSTORE_PASSWORD"
           test -n "$KEY_ALIAS"
           test -n "$KEY_PASSWORD"
-
           echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/miras-upload-key.jks"
           test -s "$RUNNER_TEMP/miras-upload-key.jks"
-
           export KEYSTORE_FILE="$RUNNER_TEMP/miras-upload-key.jks"
-
           python3 - <<'PY'
           from pathlib import Path
           import re
-
           p = Path('android/app/build.gradle')
           if not p.exists():
               raise SystemExit('android/app/build.gradle not found')
-
           s = p.read_text()
-
           if 'signingConfigs {' in s and 'signingConfig signingConfigs.release' in s:
               raise SystemExit('Release signing configuration already exists; refusing to duplicate it')
-
           if not re.search(r'(?m)^\s*buildTypes\s*\{', s):
               raise SystemExit('Could not locate buildTypes block in app/build.gradle')
-
           signing = '''    signingConfigs {
               release {
                   storeFile file(System.getenv("KEYSTORE_FILE"))
@@ -300,31 +254,19 @@ jobs:
               }
           }
           '''
-
-          s = re.sub(
-              r'(?m)^(\s*)buildTypes\s*\{',
-              lambda m: signing + m.group(0),
-              s,
-              count=1
-          )
-
+          s = re.sub(r'(?m)^(\s*)buildTypes\s*\{', lambda m: signing + m.group(0), s, count=1)
           bt = re.search(r'(?m)^\s*buildTypes\s*\{', s)
           m = re.search(r'(?m)^(\s*)release\s*\{', s[bt.end():]) if bt else None
-
           if not m:
               raise SystemExit('Could not locate release buildType in app/build.gradle')
-
           insert_at = bt.end() + m.end()
           s = s[:insert_at] + '\n            signingConfig signingConfigs.release' + s[insert_at:]
-
           p.write_text(s)
           PY
-
           echo "KEYSTORE_FILE=$KEYSTORE_FILE" >> "$GITHUB_ENV"
 
       - name: Build APK
         run: |
-          set -euo pipefail
           chmod +x android/gradlew
           cd android
           ./gradlew assembleDebug
@@ -336,7 +278,6 @@ jobs:
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          set -euo pipefail
           cd android
           ./gradlew bundleRelease
 
