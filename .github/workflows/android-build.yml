@@ -167,25 +167,28 @@ jobs:
         run: |
           cd android
           ./gradlew bundleRelease
-
       - name: Verify AAB package name
         run: |
           set -euo pipefail
           META="android/app/build/outputs/bundle/release/output-metadata.json"
-          test -s "$META"
+          echo "===== AAB METADATA ====="
+          cat "$META"
           python3 - <<'PYTHON'
           import json
           from pathlib import Path
 
           meta = json.loads(Path("android/app/build/outputs/bundle/release/output-metadata.json").read_text())
           actual = meta.get("applicationId")
-          expected = "com.irfanululoom.mirathcalculator"
 
-          if actual != expected:
-              raise SystemExit(f"Wrong package name in AAB: {actual!r}; expected {expected!r}")
+          print("ACTUAL PACKAGE ID:", repr(actual))
+          print("EXPECTED PACKAGE ID: com.irfanululoom.mirathcalculator")
 
-          print(f"Verified AAB package name: {actual}")
+          if actual != "com.irfanululoom.mirathcalculator":
+              raise SystemExit("Package ID does not match Play Console")
+
+          print("Package ID verified successfully")
           PYTHON
+
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
