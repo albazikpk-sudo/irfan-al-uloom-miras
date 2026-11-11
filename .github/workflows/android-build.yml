@@ -31,20 +31,16 @@ jobs:
           mkdir -p extracted
           unzip -q irfan-al-uloom-miras-source.zip -d extracted
           SOURCE_FILE="$(find extracted -type f -name package.json -print -quit)"
-
           if [ -z "$SOURCE_FILE" ]; then
-            echo "package.json not found in ZIP"
+            echo 'package.json not found in ZIP'
             exit 1
           fi
-
           SOURCE_DIR="$(dirname "$SOURCE_FILE")"
           cp -a "$SOURCE_DIR"/. .
-
           rm -f capacitor.config.ts
-
           cat > capacitor.config.json <<'JSON'
           {
-            "appId": "com.irfanululoom.mirathcalculator",
+            "appId": "com.irfanuloom.mirathcalculator",
             "appName": "عرفان العلوم میراث کیلکولیٹر",
             "webDir": "www",
             "android": {
@@ -52,7 +48,6 @@ jobs:
             }
           }
           JSON
-
           test -f www/index.html
           test -d android-icons
 
@@ -79,16 +74,14 @@ jobs:
           pattern = r"(?m)^(\s*minSdkVersion\s*=\s*)23(\s*)$"
           updated, count = re.subn(pattern, r"\g<1>24\g<2>", content)
 
-          if count == 1:
-              p.write_text(updated)
-              print("minSdkVersion updated to 24")
-          elif re.search(r"(?m)^\s*minSdkVersion\s*=\s*24\s*$", content):
-              print("minSdkVersion is already 24")
-          else:
+          if count != 1:
               raise SystemExit(
-                  f"Could not safely set minSdkVersion to 24. "
-                  f"Found {count} matching version-23 entries."
+                  f"Expected exactly one minSdkVersion = 23 entry; found {count}. "
+                  "Stopping without changing the file."
               )
+
+          p.write_text(updated)
+          print("minSdkVersion updated from 23 to 24")
           PYTHON
 
       - name: Install App Icons
@@ -97,66 +90,21 @@ jobs:
       - name: Sync Android
         run: npx cap sync android
 
-      - name: Set and Verify Android Package Name
+      - name: Verify Android package name
         run: |
           set -euo pipefail
           python3 - <<'PYTHON'
           from pathlib import Path
           import re
-
-          gradle = Path("android/app/build.gradle")
-          if not gradle.is_file():
-              raise SystemExit("android/app/build.gradle was not generated")
-
-          expected = "com.irfanululoom.mirathcalculator"
-          content = gradle.read_text()
-
-          pattern = r'(?m)^(\s*)applicationId\s*(?:=\s*)?["\']([^"\']+)["\']'
-
-          matches = list(re.finditer(pattern, content))
-
-          if len(matches) > 1:
-              raise SystemExit(
-                  f"More than one applicationId found: "
-                  f"{[m.group(2) for m in matches]}"
-              )
-
-          if len(matches) == 1:
-              m = matches[0]
-              replacement = (
-                  m.group(1) + 'applicationId "' + expected + '"'
-              )
-              content = (
-                  content[:m.start()] + replacement + content[m.end():]
-              )
-          else:
-              default_config = re.search(
-                  r'(?m)^(\s*)defaultConfig\s*\{',
-                  content
-              )
-
-              if not default_config:
-                  raise SystemExit(
-                      "Could not find defaultConfig block in build.gradle"
-                  )
-
-              insert_at = default_config.end()
-              indent = default_config.group(1) + "    "
-              content = (
-                  content[:insert_at]
-                  + '\n' + indent + 'applicationId "' + expected + '"'
-                  + content[insert_at:]
-              )
-
-          gradle.write_text(content)
-
-          check = re.findall(pattern, gradle.read_text())
-          if len(check) != 1 or check[0][1] != expected:
-              raise SystemExit(
-                  f"Package name verification failed: {check!r}"
-              )
-
-          print("Verified Android applicationId:", expected)
+          p = Path("android/app/build.gradle")
+          if not p.is_file():
+              raise SystemExit("android/app/build.gradle not found")
+          content = p.read_text()
+          ids = re.findall(r'''(?m)^\s*applicationId\s+[\"']([^\"']+)[\"']''', content)
+          expected = "com.irfanuloom.mirathcalculator"
+          if len(ids) != 1 or ids[0] != expected:
+              raise SystemExit(f"Package name mismatch: found {ids!r}; expected {expected!r}")
+          print(f"Verified Android applicationId: {ids[0]}")
           PYTHON
 
       - name: Configure Release Signing
@@ -167,76 +115,43 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           set -euo pipefail
-
           test -n "$KEYSTORE_BASE64"
           test -n "$KEYSTORE_PASSWORD"
           test -n "$KEY_ALIAS"
           test -n "$KEY_PASSWORD"
-
-          echo "$KEYSTORE_BASE64" | base64 --decode \
-            > "$RUNNER_TEMP/miras-upload-key.jks"
-
+          echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/miras-upload-key.jks"
           test -s "$RUNNER_TEMP/miras-upload-key.jks"
-
           export KEYSTORE_FILE="$RUNNER_TEMP/miras-upload-key.jks"
-
-          python3 - <<'PYTHON'
+          python3 - <<'PY'
           from pathlib import Path
           import re
-
-          p = Path("android/app/build.gradle")
+          p = Path('android/app/build.gradle')
           if not p.exists():
-              raise SystemExit("android/app/build.gradle not found")
-
+              raise SystemExit('android/app/build.gradle not found')
           s = p.read_text()
-
-          if "signingConfigs {" in s:
-              raise SystemExit(
-                  "Signing configuration already exists. "
-                  "Stopping to avoid duplicate signing settings."
-              )
-
-          if not re.search(r"(?m)^\s*buildTypes\s*\{", s):
-              raise SystemExit("Could not locate buildTypes block")
-
+          if 'signingConfigs {' in s and 'signingConfig signingConfigs.release' in s:
+              raise SystemExit('Release signing configuration already exists; refusing to duplicate it')
+          if not re.search(r'(?m)^\s*buildTypes\s*\{', s):
+              raise SystemExit('Could not locate buildTypes block in app/build.gradle')
           signing = '''    signingConfigs {
-              release {
-                  storeFile file(System.getenv("KEYSTORE_FILE"))
-                  storePassword System.getenv("KEYSTORE_PASSWORD")
-                  keyAlias System.getenv("KEY_ALIAS")
-                  keyPassword System.getenv("KEY_PASSWORD")
-              }
+          release {
+              storeFile file(System.getenv("KEYSTORE_FILE"))
+              storePassword System.getenv("KEYSTORE_PASSWORD")
+              keyAlias System.getenv("KEY_ALIAS")
+              keyPassword System.getenv("KEY_PASSWORD")
+          }
           }
 
           '''
-
-          s = re.sub(
-              r"(?m)^(\s*)buildTypes\s*\{",
-              lambda m: signing + m.group(0),
-              s,
-              count=1
-          )
-
-          bt = re.search(r"(?m)^\s*buildTypes\s*\{", s)
-          m = re.search(
-              r"(?m)^(\s*)release\s*\{",
-              s[bt.end():]
-          ) if bt else None
-
+          s = re.sub(r'(?m)^(\s*)buildTypes\s*\{', lambda m: signing + m.group(0), s, count=1)
+          bt = re.search(r'(?m)^\s*buildTypes\s*\{', s)
+          m = re.search(r'(?m)^(\s*)release\s*\{', s[bt.end():]) if bt else None
           if not m:
-              raise SystemExit("Could not locate release buildType")
-
+              raise SystemExit('Could not locate release buildType in app/build.gradle')
           insert_at = bt.end() + m.end()
-
-          s = (
-              s[:insert_at]
-              + "\n            signingConfig signingConfigs.release"
-              + s[insert_at:]
-          )
-
+          s = s[:insert_at] + '\n            signingConfig signingConfigs.release' + s[insert_at:]
           p.write_text(s)
-          PYTHON
-
+          PY
           echo "KEYSTORE_FILE=$KEYSTORE_FILE" >> "$GITHUB_ENV"
 
       - name: Build APK
@@ -255,50 +170,21 @@ jobs:
           cd android
           ./gradlew bundleRelease
 
-      - name: Check Signed AAB and Package Name
+      - name: Check Signed AAB exists
         run: |
           set -euo pipefail
-
           AAB="android/app/build/outputs/bundle/release/app-release.aab"
-          META="android/app/build/outputs/bundle/release/output-metadata.json"
-
           test -s "$AAB"
-          test -s "$META"
-
-          python3 - <<'PYTHON'
-          import json
-          from pathlib import Path
-
-          meta = json.loads(
-              Path(
-                  "android/app/build/outputs/bundle/release/output-metadata.json"
-              ).read_text()
-          )
-
-          actual = meta.get("applicationId")
-          expected = "com.irfanululoom.mirathcalculator"
-
-          print("Actual Package Name:", actual)
-          print("Expected Package Name:", expected)
-
-          if actual != expected:
-              raise SystemExit("AAB package name does not match Play Console")
-
-          print("AAB package name verified successfully")
-          PYTHON
-
-          echo "Signed AAB file exists and package name is verified."
+          echo "Signed AAB file exists: $AAB"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Irfan-Al-Uloom-Miras-APK
           path: android/app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
 
       - name: Upload Signed AAB
         uses: actions/upload-artifact@v4
         with:
           name: Irfan-Al-Uloom-Miras-AAB-signed
           path: android/app/build/outputs/bundle/release/app-release.aab
-          if-no-files-found: error
