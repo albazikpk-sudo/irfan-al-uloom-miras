@@ -135,9 +135,18 @@ jobs:
           build.write_text(content)
           wrapper = Path("android/gradle/wrapper/gradle-wrapper.properties")
           if not wrapper.is_file(): raise SystemExit("Gradle wrapper properties not found")
-          w, wc = re.subn(r"(?m)^distributionUrl=.*gradle-[^/]+-bin\.zip$", "distributionUrl=https\\://services.gradle.org/distributions/gradle-8.11.1-bin.zip", wrapper.read_text())
-          if wc != 1: raise SystemExit(f"Expected one Gradle distributionUrl; found {wc}")
-          wrapper.write_text(w)
+          wrapper_text = wrapper.read_text().replace("\r\n", "\n")
+          # Capacitor may generate either -bin.zip or -all.zip; replace the
+          # complete distributionUrl property regardless of the old archive type.
+          w, wc = re.subn(
+              r"(?m)^distributionUrl\s*=.*$",
+              r"distributionUrl=https\://services.gradle.org/distributions/gradle-8.11.1-bin.zip",
+              wrapper_text,
+          )
+          if wc != 1: raise SystemExit(f"Expected one Gradle distributionUrl property; found {wc}")
+          wrapper.write_text(w + ("\n" if not w.endswith("\n") else ""))
+          if "gradle-8.11.1-bin.zip" not in wrapper.read_text():
+              raise SystemExit("Gradle wrapper URL verification failed")
           print("Verified AGP 8.9.1 and Gradle 8.11.1 for Android API 36")
           PYTHON
 
